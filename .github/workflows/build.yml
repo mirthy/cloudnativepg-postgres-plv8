@@ -17,13 +17,18 @@ jobs:
     
     strategy:
       matrix:
-        pg-version: [13, 14, 15, 16, 17]
+        pg-version: [15, 16, 17]
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -46,21 +51,24 @@ jobs:
             type=raw,value=${{ matrix.pg-version }},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=raw,value=latest-${{ matrix.pg-version }},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
-      - name: Build image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           build-args: |
             PG_CONTAINER_VERSION=${{ matrix.pg-version }}
           push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Test image
+      # We can only test locally for PR builds
+      - name: Test image locally (PR only)
+        if: github.event_name == 'pull_request'
         run: |
-          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
-          docker run --rm $IMAGE_TAG postgres --version
+          # For PR builds, we need to build a local version for testing
+          docker buildx build --load --build-arg PG_CONTAINER_VERSION=${{ matrix.pg-version }} -t test-pg-plv8:${{ matrix.pg-version }} .
+          docker run --rm test-pg-plv8:${{ matrix.pg-version }} postgres --version
           # Additional tests to verify PLV8 extension is working

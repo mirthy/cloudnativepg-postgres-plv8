@@ -7,10 +7,12 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG PG_CONTAINER_VERSION=17
 
 # Install build dependencies for PLV8
+# Note: Architecture-specific dependencies are handled automatically
 RUN set -ex \
   && apt-get update \
   && apt-get install -y build-essential git postgresql-server-dev-${PG_CONTAINER_VERSION} \
      libtinfo5 pkg-config clang binutils libstdc++-12-dev cmake \
+     libglib2.0-dev \
   && apt-get clean
 # PLV8 version configuration
 ARG PLV8_BRANCH=r3.2
@@ -18,9 +20,15 @@ ENV PLV8_BRANCH=${PLV8_BRANCH}
 ARG PLV8_VERSION=3.2.3
 ENV PLV8_VERSION=${PLV8_VERSION}
 # Build and install PLV8
+# Note: Build will automatically adjust for the target architecture
 RUN set -ex \
   && git clone --branch ${PLV8_BRANCH} --single-branch --depth 1 https://github.com/plv8/plv8 \
   && cd plv8 \
+  && if [ "$(uname -m)" = "aarch64" ]; then \
+       echo "Building on ARM64 architecture"; \
+       # ARM64 might need more memory for the V8 build process \
+       export V8_CXXFLAGS="-O2"; \
+     fi \
   && make install \
   && strip /usr/lib/postgresql/${PG_CONTAINER_VERSION}/lib/plv8-${PLV8_VERSION}.so
 

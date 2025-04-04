@@ -23,6 +23,10 @@ docker pull ghcr.io/USERNAME/cloudnativepg-plv8:latest-17
 # - 1.0.0-17, 1.0.0-16, etc.: Version-specific tags (when releases are tagged)
 ```
 
+All images are multi-architecture builds with support for:
+- linux/amd64 (x86_64) - Standard Intel/AMD servers
+- linux/arm64 (aarch64) - AWS Graviton, Apple Silicon, Raspberry Pi 4, etc.
+
 #### Building Locally
 
 You can also build the Docker image locally:
@@ -71,8 +75,9 @@ CREATE EXTENSION plv8;
 This repository includes GitHub Actions workflows that:
 
 1. Build the image for multiple PostgreSQL versions (13, 14, 15, 16, 17)
-2. Run basic tests to ensure the image works properly
-3. Push the images to GitHub Container Registry with appropriate tags
+2. Create multi-architecture images for both AMD64 (x86_64) and ARM64 platforms
+3. Run basic tests to ensure the image works properly
+4. Push the images to GitHub Container Registry with appropriate tags
 
 To trigger a release with semantic versioning tags:
 
@@ -83,6 +88,16 @@ git push origin v1.0.0
 ```
 
 This will create images with tags like `1.0.0-13`, `1.0.0-14`, etc.
+
+### Multi-Architecture Builds
+
+The CI/CD pipeline builds images for both AMD64 (x86_64) and ARM64 architectures. This means:
+
+- The same image can run on regular x86 servers, AWS Graviton instances, Apple Silicon Macs, etc.
+- No need to specify the architecture when pulling the image - Docker will automatically select the correct one for your platform
+- ARM64 builds may take longer in the CI/CD pipeline due to emulation on GitHub's x86 runners
+
+If you encounter any architecture-specific issues, please report them via GitHub issues.
 
 ## License
 
