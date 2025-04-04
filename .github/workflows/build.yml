@@ -9,35 +9,26 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # Job to prepare common metadata and setup for all builds
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
     permissions:
       contents: read
       packages: write
-    
-    strategy:
-      matrix:
-        pg-version: [15, 16, 17]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-
-      - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       
+      # Generate build matrix dynamically
+      - id: set-matrix
+        name: Create build matrix
+        run: |
+          echo "matrix={\"pg-version\":[15,16,17],\"platform\":[\"linux/amd64\",\"linux/arm64\"]}" >> $GITHUB_OUTPUT
+      
+      # Extract metadata for Docker images
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -48,25 +39,87 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=${{ matrix.pg-version }},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-            type=raw,value=latest-${{ matrix.pg-version }},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=raw,value={{matrix.pg-version}},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=raw,value=latest-{{matrix.pg-version}},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
+  # Main build job that runs in parallel for each platform and PostgreSQL version
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Continue with other builds if one fails
+      matrix: ${{fromJson(needs.prepare.outputs.matrix)}}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Set up QEMU for cross-platform builds
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+        
+      # Set up Docker Buildx with improved settings
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      # Login to GitHub Container Registry
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Create cache key based on platform and PostgreSQL version
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          CACHE_KEY=$(echo "${{ matrix.platform }}-${{ matrix.pg-version }}" | sed 's/[/]/-/g')
+          echo "key=${CACHE_KEY}" >> $GITHUB_OUTPUT
+      
+      # Build and push with optimized caching
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           build-args: |
             PG_CONTAINER_VERSION=${{ matrix.pg-version }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ needs.prepare.outputs.tags }}
+          labels: ${{ needs.prepare.outputs.labels }}
+          cache-from: |
+            type=gha,scope=${{ steps.cache-key.outputs.key }}
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:buildcache-${{ steps.cache-key.outputs.key }}
+          cache-to: |
+            type=gha,scope=${{ steps.cache-key.outputs.key }},mode=max
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:buildcache-${{ steps.cache-key.outputs.key }},mode=max
 
-      # We can only test locally for PR builds
+  # Test job that runs after all builds are complete
+  test:
+    needs: [prepare, build]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pg-version: [13, 14, 15, 16, 17]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      # Test image locally for PR builds
       - name: Test image locally (PR only)
-        if: github.event_name == 'pull_request'
         run: |
           # For PR builds, we need to build a local version for testing
           docker buildx build --load --build-arg PG_CONTAINER_VERSION=${{ matrix.pg-version }} -t test-pg-plv8:${{ matrix.pg-version }} .
