@@ -1,0 +1,17 @@
+# Docker
+.dockerignore
+
+# IDE/Editor specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.tar
+*.tar.gz
