@@ -40,6 +40,15 @@ ARG PLV8_VERSION=3.2.3
 # Switch to root user to copy files
 USER root
 
+# Install required runtime dependencies for PLV8
+RUN set -ex \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+     libc6 \
+     libstdc++6 \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
 # Copy PLV8 files from builder to final image
 COPY --from=builder /usr/lib/postgresql/${PG_CONTAINER_VERSION}/lib/plv8* /usr/lib/postgresql/${PG_CONTAINER_VERSION}/lib/
 COPY --from=builder /usr/lib/postgresql/${PG_CONTAINER_VERSION}/lib/bitcode/plv8-${PLV8_VERSION}/* /usr/lib/postgresql/${PG_CONTAINER_VERSION}/lib/bitcode/plv8-${PLV8_VERSION}/
