@@ -130,6 +130,9 @@ jobs:
     needs: [prepare, build-amd64, build-arm64]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       # Set up Docker Buildx first
       - name: Set up Docker Buildx
