@@ -125,8 +125,6 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -134,27 +132,40 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
       # Enable Docker experimental features for manifest support
       - name: Enable Docker experimental features
         run: |
           mkdir -p ~/.docker
           echo '{"experimental": "enabled"}' > ~/.docker/config.json
+          # Also enable experimental CLI features
+          echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker version
       
-      # Create and push multi-arch manifest using buildx
-      - name: Create and push multi-arch image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          build-args: |
-            PG_CONTAINER_VERSION=17
-          push: true
-          tags: ${{ needs.prepare.outputs.tags }}
-          labels: ${{ needs.prepare.outputs.labels }}
-          # Use the images we already built as cache sources
-          cache-from: |
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64
+      # Create and push multi-arch manifest using Docker CLI directly
+      - name: Create and push multi-arch manifests
+        run: |
+          # Process each tag from the prepare job
+          echo "${{ needs.prepare.outputs.tags }}" | while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "Creating manifest for $tag"
+              
+              # Create the manifest
+              docker manifest create "$tag" \
+                --amend "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64" \
+                --amend "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64"
+              
+              # Add architecture-specific annotations
+              docker manifest annotate "$tag" \
+                "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64" \
+                --os linux --arch amd64
+              
+              docker manifest annotate "$tag" \
+                "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64" \
+                --os linux --arch arm64 --variant v8
+              
+              # Push the manifest
+              docker manifest push --purge "$tag"
+              echo "Successfully pushed manifest for $tag"
+            fi
+          done
