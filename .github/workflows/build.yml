@@ -137,26 +137,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      # Create and push multi-arch manifest using Docker manifest command
-      - name: Create and push manifest
+      # Enable Docker experimental features for manifest support
+      - name: Enable Docker experimental features
         run: |
-          # Pull the individual images
-          docker pull ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64
-          docker pull ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64
-          
-          # Create the manifest lists
-          for tag in $(echo "${{ needs.prepare.outputs.tags }}" | tr '\n' ' '); do
-            echo "Creating manifest for $tag"
-            docker manifest create $tag \
-              ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64 \
-              ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64
-            
-            # Annotate the manifest with architecture information
-            docker manifest annotate $tag \
-              ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64 --os linux --arch amd64
-            docker manifest annotate $tag \
-              ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64 --os linux --arch arm64
-            
-            # Push the manifest
-            docker manifest push $tag
-          done
+          mkdir -p ~/.docker
+          echo '{"experimental": "enabled"}' > ~/.docker/config.json
+      
+      # Create and push multi-arch manifest using buildx
+      - name: Create and push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PG_CONTAINER_VERSION=17
+          push: true
+          tags: ${{ needs.prepare.outputs.tags }}
+          labels: ${{ needs.prepare.outputs.labels }}
+          # Use the images we already built as cache sources
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64
