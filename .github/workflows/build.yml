@@ -69,6 +69,9 @@ jobs:
           labels: ${{ needs.prepare.outputs.labels }}
           cache-from: type=gha,scope=amd64
           cache-to: type=gha,scope=amd64,mode=max
+          # Ensure we're creating a single-architecture image
+          provenance: false
+          sbom: false
 
       # Test amd64 image for PR builds
       - name: Test amd64 image locally (PR only)
@@ -111,6 +114,9 @@ jobs:
           labels: ${{ needs.prepare.outputs.labels }}
           cache-from: type=gha,scope=arm64
           cache-to: type=gha,scope=arm64,mode=max
+          # Ensure we're creating a single-architecture image
+          provenance: false
+          sbom: false
 
       # Test arm64 image for PR builds
       - name: Test arm64 image locally (PR only)
@@ -142,30 +148,30 @@ jobs:
           sudo systemctl restart docker
           docker version
       
-      # Create and push multi-arch manifest using Docker CLI directly
-      - name: Create and push multi-arch manifests
+      # Use buildx to create the final multi-arch images without rebuilding
+      - name: Create and push multi-arch images
         run: |
+          # Install latest buildx version to ensure we have all features
+          docker buildx version
+          
+          # Create a new builder instance with better caching
+          docker buildx create --name multiarch-builder --use
+          docker buildx inspect --bootstrap
+          
           # Process each tag from the prepare job
           echo "${{ needs.prepare.outputs.tags }}" | while read -r tag; do
             if [ -n "$tag" ]; then
-              echo "Creating manifest for $tag"
+              echo "Creating multi-arch image for $tag"
               
-              # Create the manifest
-              docker manifest create "$tag" \
-                --amend "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64" \
-                --amend "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64"
-              
-              # Add architecture-specific annotations
-              docker manifest annotate "$tag" \
+              # Use buildx imagetools to create the manifest
+              docker buildx imagetools create \
+                --tag "$tag" \
                 "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-amd64" \
-                --os linux --arch amd64
+                "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64"
               
-              docker manifest annotate "$tag" \
-                "ghcr.io/${{ github.repository_owner }}/cloudnativepg-plv8:17-arm64" \
-                --os linux --arch arm64 --variant v8
-              
-              # Push the manifest
-              docker manifest push --purge "$tag"
-              echo "Successfully pushed manifest for $tag"
+              echo "Successfully created multi-arch image for $tag"
             fi
           done
+          
+          # Clean up the builder
+          docker buildx rm multiarch-builder
