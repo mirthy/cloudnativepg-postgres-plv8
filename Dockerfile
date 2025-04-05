@@ -1,18 +1,30 @@
 # Base PostgreSQL version to use
 ARG PG_CONTAINER_VERSION=17
-FROM docker.io/library/postgres:${PG_CONTAINER_VERSION}-bookworm as builder
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_CONTAINER_VERSION} as builder
 
 # Set environment for non-interactive apt installations
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PG_CONTAINER_VERSION=17
 
+# Switch to root user to copy files
+USER root
+
 # Install build dependencies for PLV8
 # Note: Architecture-specific dependencies are handled automatically
 RUN set -ex \
   && apt-get update \
-  && apt-get install -y build-essential git postgresql-server-dev-${PG_CONTAINER_VERSION} \
-     libtinfo5 pkg-config clang binutils libstdc++-12-dev cmake \
-     libglib2.0-dev \
+  && apt-get install -y \
+      build-essential \
+      git \
+      curl \
+      cmake \
+      clang \
+      binutils \
+      libstdc++-10-dev \
+      libglib2.0-dev \
+      postgresql-server-dev-${PG_CONTAINER_VERSION} \
+      libtinfo5 \
+      pkg-config \
   && apt-get clean
 # PLV8 version configuration
 ARG PLV8_BRANCH=r3.2
@@ -44,7 +56,6 @@ USER root
 RUN set -ex \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
-     libc6 \
      libstdc++6 \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
